@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { generateCompanyState } from "@/lib/companyState";
 
 type Screen = "welcome" | "create" | "room";
 
@@ -117,6 +118,13 @@ export default function Home() {
   const [predictiveAssistance, setPredictiveAssistance] = useState(true);
   const [companyMemory, setCompanyMemory] = useState(true);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
+
+  const companyState = generateCompanyState(
+    companyProfile,
+    tasks,
+    documents,
+    decisions
+  );
 
   useEffect(() => {
     const saved = window.localStorage.getItem("ai-company-run-v01");
@@ -379,44 +387,6 @@ export default function Home() {
     ];
   }
 
-  function getCompanyNodes() {
-    return [
-      {
-        name: "Product",
-        status: companyProfile.description || "No product description yet.",
-        question: "What is the smallest painful use case this product solves?",
-      },
-      {
-        name: "Customers",
-        status:
-          documents.length > 0
-            ? "Customer brief draft exists."
-            : "First customer segment not approved yet.",
-        question: "Who feels this problem every day?",
-      },
-      {
-        name: "Market",
-        status: "Category and competitors are not mapped yet.",
-        question: "What existing tool does the user currently replace?",
-      },
-      {
-        name: "Operations",
-        status: companyProfile.bottleneck || "No bottleneck declared yet.",
-        question: "What is slowing the founder down right now?",
-      },
-      {
-        name: "Finance",
-        status: "Revenue model not defined in this prototype.",
-        question: "How does this product eventually make money?",
-      },
-      {
-        name: "Documents",
-        status: `${documents.length} prepared document${documents.length === 1 ? "" : "s"}.`,
-        question: "What document would make the next decision easier?",
-      },
-    ];
-  }
-
   function getStatusClass(status: TaskStatus) {
     if (status === "Approved") {
       return "bg-emerald-50 text-emerald-700";
@@ -542,7 +512,7 @@ export default function Home() {
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              {getCompanyNodes().map((node) => (
+              {companyState.nodes.map((node) => (
                 <div
                   key={node.name}
                   className="rounded-[2rem] border border-neutral-200 bg-white/80 p-6 shadow-sm transition hover:-translate-y-0.5 hover:bg-white"
@@ -554,8 +524,13 @@ export default function Home() {
                   <p className="mt-3 text-sm leading-6 text-neutral-600">
                     {node.status}
                   </p>
+                  <p className="mt-4 text-sm leading-6 text-neutral-500">
+                    Risk: {node.risk}
+                  </p>
                   <p className="mt-4 rounded-2xl bg-[#f7f6f2] p-4 text-sm leading-6 text-neutral-500">
-                    Next question: {node.question}
+                    Next question: {node.nextQuestion}
+                    <br />
+                    Next action: {node.nextAction}
                   </p>
                 </div>
               ))}
