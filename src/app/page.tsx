@@ -34,6 +34,7 @@ type Task = {
   owner: string;
   status: TaskStatus;
   source: string;
+  context?: string;
   draft?: string;
 };
 
@@ -51,6 +52,12 @@ type Decision = {
   reason: string;
   impact: string;
   sourceTaskId?: number;
+};
+
+type AdvisorResponse = {
+  whatHappened: string;
+  whyItMatters: string;
+  whatToDoNext: string;
 };
 
 type Signal = {
@@ -117,6 +124,10 @@ export default function Home() {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [predictiveAssistance, setPredictiveAssistance] = useState(true);
   const [companyMemory, setCompanyMemory] = useState(true);
+  const [advisorResponse, setAdvisorResponse] =
+    useState<AdvisorResponse | null>(null);
+  const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
+  const [advisorError, setAdvisorError] = useState("");
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
 
   const companyState = generateCompanyState(
@@ -197,6 +208,24 @@ export default function Home() {
     setActiveSection("company-room");
   }
 
+  function createTaskFromAdvisorAdvice() {
+    if (!advisorResponse?.whatToDoNext) {
+      return;
+    }
+
+    const newTask: Task = {
+      id: tasks.length + 1,
+      title: advisorResponse.whatToDoNext,
+      owner: "AI Operator",
+      status: "Waiting for approval",
+      source: "AI Advisor",
+      context: advisorResponse.whyItMatters,
+    };
+
+    setTasks((currentTasks) => [newTask, ...currentTasks]);
+    setActiveSection("tasks");
+  }
+
   function createOperatingTask(source = "AI Operator") {
     const nextIdea = taskIdeas[tasks.length % taskIdeas.length];
 
@@ -216,7 +245,14 @@ export default function Home() {
     const idea = taskIdeas.find((taskIdea) => taskIdea.title === task.title);
     const draftContent =
       idea?.draft ||
-      "Draft: The AI Operator prepared an operating draft based on this task.";
+      `Draft: ${task.title}
+
+Operating context: ${
+        task.context ||
+        "This task was prepared from the current company operating state."
+      }
+
+Suggested output: Turn this task into a short operating memo with a clear decision, next action, and owner.`;
 
     setTasks((currentTasks) =>
       currentTasks.map((currentTask) =>
@@ -317,6 +353,42 @@ export default function Home() {
 
   function getCompanyName() {
     return companyProfile.companyName || "Untitled Company";
+  }
+
+  async function requestAIAdvisor() {
+    setIsAdvisorLoading(true);
+    setAdvisorError("");
+
+    try {
+      const response = await fetch("/api/advisor", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          companyState,
+        }),
+      });
+
+      const data = (await response.json()) as {
+        advisor?: AdvisorResponse;
+        error?: string;
+      };
+
+      if (!response.ok || !data.advisor) {
+        throw new Error(data.error || "AI Advisor could not respond.");
+      }
+
+      setAdvisorResponse(data.advisor);
+    } catch (error) {
+      setAdvisorError(
+        error instanceof Error
+          ? error.message
+          : "AI Advisor could not respond."
+      );
+    } finally {
+      setIsAdvisorLoading(false);
+    }
   }
 
   function getAdvisorNextStep() {
@@ -424,8 +496,19 @@ export default function Home() {
           </span>
         </div>
 
+        {task.context && (
+          <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+              Operating context
+            </p>
+            <p className="mt-2 text-sm leading-6 text-neutral-600">
+              {task.context}
+            </p>
+          </div>
+        )}
+
         {task.draft && (
-          <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4 text-sm leading-6 text-neutral-600">
+          <div className="mt-4 whitespace-pre-line rounded-2xl bg-[#f7f6f2] p-4 text-sm leading-6 text-neutral-600">
             {task.draft}
           </div>
         )}
@@ -970,8 +1053,9 @@ export default function Home() {
                     What happened?
                   </h3>
                   <p className="mt-2 text-sm leading-6 text-neutral-500">
-                    Your company room is active. The system now separates tasks,
-                    documents, decisions, signals, and trust controls.
+                    {advisorResponse
+                      ? advisorResponse.whatHappened
+                      : "Your company room is active. The system now separates tasks, documents, decisions, signals, and trust controls."}
                   </p>
                 </div>
 
@@ -980,8 +1064,9 @@ export default function Home() {
                     Why it matters?
                   </h3>
                   <p className="mt-2 text-sm leading-6 text-neutral-500">
-                    A one-person company needs a shared operating context, not
-                    scattered notes and endless chat.
+                    {advisorResponse
+                      ? advisorResponse.whyItMatters
+                      : "A one-person company needs a shared operating context, not scattered notes and endless chat."}
                   </p>
                 </div>
 
@@ -990,9 +1075,58 @@ export default function Home() {
                     What should you do next?
                   </h3>
                   <p className="mt-2 text-sm leading-6 text-neutral-500">
-                    {getAdvisorNextStep()}
+                    {advisorResponse
+                      ? advisorResponse.whatToDoNext
+                      : getAdvisorNextStep()}
                   </p>
                 </div>
+
+                {advisorError && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-600">
+                    {advisorError}
+                  </div>
+                )}
+
+                <button
+                  onClick={requestAIAdvisor}
+                  disabled={isAdvisorLoading}
+                  className="w-full rounded-full bg-neutral-950 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                >
+                  {isAdvisorLoading ? "AI Advisor preparing..." : "Ask AI Advisor"}
+                </button>
+
+                {advisorResponse && (
+                  <div className="rounded-[1.75rem] border border-neutral-200 bg-[#f7f6f2] p-5">
+                    <div className="mb-4 inline-flex rounded-full bg-white px-3 py-1 text-xs font-medium text-neutral-500 shadow-sm">
+                      Prepared Action
+                    </div>
+
+                    <p className="text-sm font-semibold leading-6 text-neutral-950">
+                      {advisorResponse.whatToDoNext}
+                    </p>
+
+                    <p className="mt-3 text-xs leading-5 text-neutral-500">
+                      The AI Advisor prepared this as the next operating action.
+                      You can approve it into your task system.
+                    </p>
+
+                    <div className="mt-5 flex flex-col gap-2">
+                      <button
+                        onClick={createTaskFromAdvisorAdvice}
+                        className="w-full rounded-full bg-neutral-950 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+                      >
+                        Approve as Task
+                      </button>
+
+                      <button
+                        onClick={() => setAdvisorResponse(null)}
+                        className="w-full rounded-full border border-neutral-200 bg-white px-4 py-3 text-sm font-medium text-neutral-600 shadow-sm transition hover:bg-neutral-50"
+                      >
+                        Skip for now
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
