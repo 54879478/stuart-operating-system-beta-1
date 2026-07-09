@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { generateCompanyState } from "@/lib/companyState";
+import {
+  createQuickCaptureSignal,
+  type CompanySignal,
+} from "@/lib/companySignal";
 
 type Screen = "welcome" | "create" | "room";
 
@@ -9,6 +13,7 @@ type Section =
   | "company-room"
   | "today"
   | "signals"
+  | "operator"
   | "tasks"
   | "documents"
   | "decisions"
@@ -60,12 +65,29 @@ type AdvisorResponse = {
   whatToDoNext: string;
 };
 
-type Signal = {
+type WorkOrderStatus = "Assigned" | "Prepared";
+
+type DeliverableType =
+  | "Prepare task list"
+  | "Draft document"
+  | "Summarize signals"
+  | "Create follow-up plan"
+  | "Generate decision brief"
+  | "Summarize internal signals"
+  | "Research market signals"
+  | "Find customer pain points"
+  | "Prepare launch ideas"
+  | "Prepare execution plan";
+
+type OperatorWorkOrder = {
   id: number;
   title: string;
-  type: string;
-  description: string;
-  importance: "Low" | "Medium" | "High";
+  request: string;
+  deliverableType: DeliverableType;
+  dueText: string;
+  sourceContext: string;
+  status: WorkOrderStatus;
+  preparedOutput?: string;
 };
 
 const emptyCompanyProfile: CompanyProfile = {
@@ -80,6 +102,7 @@ const navItems: { label: string; value: Section }[] = [
   { label: "Company Room", value: "company-room" },
   { label: "Today", value: "today" },
   { label: "Signals", value: "signals" },
+  { label: "Operator", value: "operator" },
   { label: "Tasks", value: "tasks" },
   { label: "Documents", value: "documents" },
   { label: "Decisions", value: "decisions" },
@@ -128,14 +151,79 @@ export default function Home() {
     useState<AdvisorResponse | null>(null);
   const [isAdvisorLoading, setIsAdvisorLoading] = useState(false);
   const [advisorError, setAdvisorError] = useState("");
+  const [quickCaptureInput, setQuickCaptureInput] = useState("");
+  const [companySignals, setCompanySignals] = useState<CompanySignal[]>([]);
+  const [workOrders, setWorkOrders] = useState<OperatorWorkOrder[]>([]);
+  const [runningMissionId, setRunningMissionId] = useState<number | null>(null);
+  const [workOrderRequest, setWorkOrderRequest] = useState("");
+  const [workOrderDeliverableType, setWorkOrderDeliverableType] =
+    useState<DeliverableType>("Research market signals");
+  const [workOrderDueText, setWorkOrderDueText] = useState("Tomorrow morning");
+  const [workOrderSourceContext, setWorkOrderSourceContext] = useState(
+    "Company profile, recent signals, and the market area you want the operator to investigate"
+  );
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
 
   const companyState = generateCompanyState(
     companyProfile,
     tasks,
     documents,
-    decisions
+    decisions,
+    companySignals
   );
+  function getSeverityStyles(severity?: string) {
+    if (severity === "Red") {
+      return {
+        card: "border-2",
+        badge: "",
+        cardStyle: {
+          borderColor: "#D64545",
+          backgroundColor: "#fff1f1",
+        },
+        badgeStyle: {
+          backgroundColor: "#D64545",
+          color: "#ffffff",
+        },
+      };
+    }
+
+    if (severity === "Yellow") {
+      return {
+        card: "border-2",
+        badge: "",
+        cardStyle: {
+          borderColor: "#D9A441",
+          backgroundColor: "#fff8e8",
+        },
+        badgeStyle: {
+          backgroundColor: "#D9A441",
+          color: "#ffffff",
+        },
+      };
+    }
+
+    if (severity === "Green") {
+      return {
+        card: "border-2",
+        badge: "",
+        cardStyle: {
+          borderColor: "#4C9A68",
+          backgroundColor: "#f0fbf4",
+        },
+        badgeStyle: {
+          backgroundColor: "#4C9A68",
+          color: "#ffffff",
+        },
+      };
+    }
+
+    return {
+      card: "border border-neutral-200 bg-white/80",
+      badge: "bg-[#f7f6f2] text-neutral-500",
+      cardStyle: {},
+      badgeStyle: {},
+    };
+  }
 
   useEffect(() => {
     const saved = window.localStorage.getItem("ai-company-run-v01");
@@ -147,6 +235,8 @@ export default function Home() {
           tasks: Task[];
           documents: DocumentItem[];
           decisions: Decision[];
+          companySignals?: CompanySignal[];
+          workOrders?: OperatorWorkOrder[];
           predictiveAssistance: boolean;
           companyMemory: boolean;
         };
@@ -155,6 +245,8 @@ export default function Home() {
         setTasks(parsed.tasks);
         setDocuments(parsed.documents);
         setDecisions(parsed.decisions);
+        setCompanySignals(parsed.companySignals || []);
+        setWorkOrders(parsed.workOrders || []);
         setPredictiveAssistance(parsed.predictiveAssistance);
         setCompanyMemory(parsed.companyMemory);
 
@@ -182,6 +274,8 @@ export default function Home() {
         tasks,
         documents,
         decisions,
+        companySignals,
+        workOrders,
         predictiveAssistance,
         companyMemory,
       })
@@ -192,6 +286,8 @@ export default function Home() {
     tasks,
     documents,
     decisions,
+    companySignals,
+    workOrders,
     predictiveAssistance,
     companyMemory,
   ]);
@@ -206,6 +302,63 @@ export default function Home() {
   function generateCompanyRoom() {
     setScreen("room");
     setActiveSection("company-room");
+  }
+
+  function analyzeQuickCapture() {
+    const trimmedInput = quickCaptureInput.trim();
+
+    if (!trimmedInput) {
+      return;
+    }
+
+    const newSignal = createQuickCaptureSignal(
+      trimmedInput,
+      companySignals.length + 1
+    );
+
+    setCompanySignals((currentSignals) => [newSignal, ...currentSignals]);
+    setQuickCaptureInput("");
+    setActiveSection("signals");
+  }
+
+  function createTaskFromSignal(signal: CompanySignal) {
+    const newTask: Task = {
+      id: tasks.length + 1,
+      title: signal.recommendedAction,
+      owner: "AI Operator",
+      status: "Waiting for approval",
+      source: `Signal: ${signal.title}`,
+      context: signal.whyItMatters,
+    };
+
+    setTasks((currentTasks) => [newTask, ...currentTasks]);
+    setActiveSection("tasks");
+  }
+
+  function assignSignalToOperator(signal: CompanySignal) {
+    const request = `Prepare a reviewable deliverable for this company signal: ${signal.title}. Recommended action: ${signal.recommendedAction}`;
+
+    const newWorkOrder: OperatorWorkOrder = {
+      id: workOrders.length + 1,
+      title:
+        signal.recommendedAction.length > 60
+          ? `${signal.recommendedAction.slice(0, 57)}...`
+          : signal.recommendedAction,
+      request,
+      deliverableType: "Prepare task list",
+      dueText: "Today",
+      sourceContext: `${signal.severity} ${signal.node} signal from ${signal.source}. Why it matters: ${signal.whyItMatters}`,
+      status: "Assigned",
+    };
+
+    setWorkOrders((currentWorkOrders) => [newWorkOrder, ...currentWorkOrders]);
+    setActiveSection("operator");
+  }
+
+  function ignoreSignal(signalId: number) {
+    setCompanySignals((currentSignals) =>
+      currentSignals.filter((signal) => signal.id !== signalId)
+    );
   }
 
   function createTaskFromAdvisorAdvice() {
@@ -226,6 +379,30 @@ export default function Home() {
     setActiveSection("tasks");
   }
 
+  function assignAdvisorAdviceToOperator() {
+    if (!advisorResponse?.whatToDoNext) {
+      return;
+    }
+
+    const request = `Prepare a reviewable deliverable for this AI Advisor recommendation: ${advisorResponse.whatToDoNext}`;
+
+    const newWorkOrder: OperatorWorkOrder = {
+      id: workOrders.length + 1,
+      title:
+        advisorResponse.whatToDoNext.length > 60
+          ? `${advisorResponse.whatToDoNext.slice(0, 57)}...`
+          : advisorResponse.whatToDoNext,
+      request,
+      deliverableType: "Prepare task list",
+      dueText: "Today",
+      sourceContext: `AI Advisor recommendation. Why it matters: ${advisorResponse.whyItMatters}`,
+      status: "Assigned",
+    };
+
+    setWorkOrders((currentWorkOrders) => [newWorkOrder, ...currentWorkOrders]);
+    setActiveSection("operator");
+  }
+
   function createOperatingTask(source = "AI Operator") {
     const nextIdea = taskIdeas[tasks.length % taskIdeas.length];
 
@@ -239,6 +416,142 @@ export default function Home() {
 
     setTasks((currentTasks) => [newTask, ...currentTasks]);
     setActiveSection("tasks");
+  }
+
+  function saveTodayBriefAsDocument() {
+    const latestSignal = companySignals[0];
+    const waitingTasks = tasks.filter(
+      (task) => task.status === "Waiting for approval"
+    );
+
+    const briefContent = `Today Operating Brief
+
+Company: ${getCompanyName()}
+Stage: ${companyProfile.stage}
+Main goal: ${companyProfile.mainGoal || "Not set yet"}
+Bottleneck: ${companyProfile.bottleneck || "Not set yet"}
+
+Top priority:
+${companyState.topPriority}
+
+Latest company signal:
+${
+  latestSignal
+    ? `${latestSignal.severity} ${latestSignal.node} signal — ${latestSignal.title}. Recommended action: ${latestSignal.recommendedAction}`
+    : "No company signals captured yet."
+}
+
+Pending approvals:
+${
+  waitingTasks.length === 0
+    ? "No pending approvals."
+    : waitingTasks.map((task) => `- ${task.title}`).join("\n")
+}
+
+Recommended next move:
+${latestSignal ? latestSignal.recommendedAction : companyState.topPriority}`;
+
+    const newDocument: DocumentItem = {
+      id: documents.length + 1,
+      title: "Today Operating Brief",
+      type: "Daily brief",
+      content: briefContent,
+    };
+
+    setDocuments((currentDocuments) => [newDocument, ...currentDocuments]);
+    setActiveSection("documents");
+  }
+
+  function saveWeeklyReviewAsDocument() {
+    const redSignals = companySignals.filter(
+      (signal) => signal.severity === "Red"
+    );
+    const yellowSignals = companySignals.filter(
+      (signal) => signal.severity === "Yellow"
+    );
+    const approvedTasks = tasks.filter((task) => task.status === "Approved");
+    const waitingTasks = tasks.filter(
+      (task) => task.status === "Waiting for approval"
+    );
+
+    const weeklyReviewContent = `Weekly Operating Review
+
+Company: ${getCompanyName()}
+Stage: ${companyProfile.stage}
+Main goal: ${companyProfile.mainGoal || "Not set yet"}
+Bottleneck: ${companyProfile.bottleneck || "Not set yet"}
+
+Signal summary:
+- Red signals: ${redSignals.length}
+- Yellow signals: ${yellowSignals.length}
+- Total signals: ${companySignals.length}
+
+Latest signals:
+${
+  companySignals.length === 0
+    ? "No company signals captured yet."
+    : companySignals
+        .slice(0, 5)
+        .map(
+          (signal) =>
+            `- ${signal.severity} ${signal.node}: ${signal.title}. Recommended action: ${signal.recommendedAction}`
+        )
+        .join("\n")
+}
+
+Task summary:
+- Approved tasks: ${approvedTasks.length}
+- Waiting for approval: ${waitingTasks.length}
+- Total tasks: ${tasks.length}
+
+Decisions made:
+${
+  decisions.length === 0
+    ? "No approved decisions yet."
+    : decisions
+        .slice(0, 5)
+        .map((decision) => `- ${decision.title}`)
+        .join("\n")
+}
+
+Recommended focus for next week:
+${companyState.topPriority}`;
+
+    const newDocument: DocumentItem = {
+      id: documents.length + 1,
+      title: "Weekly Operating Review",
+      type: "Weekly review",
+      content: weeklyReviewContent,
+    };
+
+    setDocuments((currentDocuments) => [newDocument, ...currentDocuments]);
+    setActiveSection("documents");
+  }
+
+  function approveDocumentAsDecision(document: DocumentItem) {
+    setDecisions((currentDecisions) => {
+      const alreadyExists = currentDecisions.some(
+        (decision) => decision.id === document.id
+      );
+
+      if (alreadyExists) {
+        return currentDecisions;
+      }
+
+      const newDecision: Decision = {
+        id: document.id,
+        title: document.title,
+        reason:
+          "The user approved this prepared document as part of the company operating memory.",
+        impact:
+          "This turns a prepared brief or draft into a recorded company decision that can guide future work.",
+        sourceTaskId: document.sourceTaskId,
+      };
+
+      return [newDecision, ...currentDecisions];
+    });
+
+    setActiveSection("decisions");
   }
 
   function createDraft(task: Task) {
@@ -347,8 +660,368 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
     setTasks([]);
     setDocuments([]);
     setDecisions([]);
+    setCompanySignals([]);
+    setWorkOrders([]);
+    setWorkOrderRequest("");
+    setWorkOrderDeliverableType("Research market signals");
+    setWorkOrderDueText("Tomorrow morning");
+    setWorkOrderSourceContext(
+      "Company profile, recent signals, and the market area you want the operator to investigate"
+    );
     setPredictiveAssistance(true);
     setCompanyMemory(true);
+  }
+
+  function applyMissionTemplate(template: {
+    request: string;
+    deliverableType: DeliverableType;
+    dueText: string;
+    sourceContext: string;
+  }) {
+    setWorkOrderRequest(template.request);
+    setWorkOrderDeliverableType(template.deliverableType);
+    setWorkOrderDueText(template.dueText);
+    setWorkOrderSourceContext(template.sourceContext);
+  }
+
+  function createOperatorWorkOrder() {
+    const trimmedRequest = workOrderRequest.trim();
+
+    if (!trimmedRequest) {
+      return;
+    }
+
+    const title =
+      trimmedRequest.length > 60
+        ? `${trimmedRequest.slice(0, 57)}...`
+        : trimmedRequest;
+
+    const newWorkOrder: OperatorWorkOrder = {
+      id: workOrders.length + 1,
+      title,
+      request: trimmedRequest,
+      deliverableType: workOrderDeliverableType,
+      dueText: workOrderDueText,
+      sourceContext: workOrderSourceContext,
+      status: "Assigned",
+    };
+
+    setWorkOrders((currentWorkOrders) => [newWorkOrder, ...currentWorkOrders]);
+    setWorkOrderRequest("");
+  }
+
+  function buildOperatorDeliverable(workOrder: OperatorWorkOrder) {
+    const recentSignalsText =
+      companySignals.length === 0
+        ? "No company signals captured yet."
+        : companySignals
+            .slice(0, 5)
+            .map(
+              (signal) =>
+                `- ${signal.severity} ${signal.node}: ${signal.title}. ${signal.summary}`
+            )
+            .join("\n");
+
+    const recentDecisionsText =
+      decisions.length === 0
+        ? "No approved decisions yet."
+        : decisions
+            .slice(0, 5)
+            .map(
+              (decision) =>
+                `- ${decision.title}. Reason: ${decision.reason}. Impact: ${decision.impact}`
+            )
+            .join("\n");
+
+    let preparedBody = "";
+
+    switch (workOrder.deliverableType) {
+      case "Summarize internal signals":
+        preparedBody = `Internal signal mission brief:
+
+What I reviewed:
+${recentSignalsText}
+
+What this means:
+The company currently has ${companySignals.length} captured signal${companySignals.length === 1 ? "" : "s"}. The operator should help the founder identify which signals need action, which can wait, and which should become tasks or decisions.
+
+Suggested actions:
+1. Review the highest-severity signal first
+2. Convert one signal into a task
+3. Assign one unclear signal back to the operator for deeper preparation
+4. Save any important pattern into company memory`;
+        break;
+      case "Research market signals":
+        preparedBody = `Research mission brief:
+
+Mission:
+${workOrder.request}
+
+Research target:
+${workOrder.sourceContext}
+
+What the operator should look for:
+1. Market changes that could affect the company
+2. Competitors or tools solving a similar problem
+3. Repeated customer pain points
+4. Content, launch, or positioning opportunities
+5. Risks the founder should not ignore
+
+Prepared research output:
+- Search angle 1: Who is already trying to solve this problem?
+- Search angle 2: What are users complaining about in this market?
+- Search angle 3: What new trends or tools are appearing?
+- Search angle 4: What should our product do differently?
+
+Suggested next action:
+Turn this research mission into either a customer pain point list, a launch idea list, or a competitor brief.
+
+Note:
+This prototype is preparing the research mission format. Real web search can be connected later through a search API.`;
+        break;
+      case "Find customer pain points":
+        preparedBody = `Customer pain point mission:
+
+Mission:
+${workOrder.request}
+
+Target context:
+${workOrder.sourceContext}
+
+Pain points to investigate:
+1. What users are currently doing manually
+2. What tools feel scattered or annoying
+3. What moments make users feel overwhelmed
+4. What users already pay for
+5. What users might urgently want solved
+
+Prepared output:
+- Pain point hypothesis 1: Users have too many scattered company signals
+- Pain point hypothesis 2: Users do not know what to do next after receiving information
+- Pain point hypothesis 3: Users want AI to prepare work, not just answer questions
+- Pain point hypothesis 4: Users need approval control before AI takes action
+
+Suggested next action:
+Create 5 customer discovery questions from these pain points.`;
+        break;
+      case "Prepare launch ideas":
+        preparedBody = `Launch idea mission:
+
+Mission:
+${workOrder.request}
+
+Company context:
+${getCompanyName()} is building toward: ${companyProfile.mainGoal || "Not set yet"}
+
+Possible launch angles:
+1. "Stop asking AI questions. Start assigning AI work."
+2. "An AI operating room for one-person companies."
+3. "Turn company signals into tasks, documents, and decisions."
+4. "AI prepares. Founder approves."
+5. "A calm command center for solo founders."
+
+Suggested launch assets:
+- One short product demo
+- One landing page promise
+- One founder story post
+- One before/after workflow screenshot
+- One waitlist call to action
+
+Suggested next action:
+Choose one launch angle and turn it into a task or document draft.`;
+        break;
+      case "Prepare execution plan":
+        preparedBody = `Execution prep mission:
+
+Mission:
+${workOrder.request}
+
+Due: ${workOrder.dueText}
+
+Execution plan:
+1. Define the outcome clearly
+2. Identify the next visible product improvement
+3. Break the work into small tasks
+4. Decide what needs founder approval
+5. Save the final output as a task, document, or decision
+
+Recommended first task:
+Create one concrete operating task that can be completed today.
+
+Approval checkpoint:
+The AI Operator should not execute external actions. The founder must approve before sending, publishing, buying, deleting, or committing.`;
+        break;
+      case "Prepare task list":
+        preparedBody = `Suggested task list based on the work request:
+
+1. Clarify the scope of: ${workOrder.request}
+2. Review source context: ${workOrder.sourceContext}
+3. Turn the highest-priority item into one operating task
+4. Review pending approvals before starting new work
+5. Schedule follow-up before ${workOrder.dueText}`;
+        break;
+      case "Draft document":
+        preparedBody = `Document draft based on the work request:
+
+Title: ${workOrder.title}
+
+Purpose:
+${workOrder.request}
+
+Company context:
+${getCompanyName()} is in the ${companyProfile.stage} stage. Main goal: ${companyProfile.mainGoal || "Not set yet"}. Current bottleneck: ${companyProfile.bottleneck || "Not set yet"}.
+
+Draft outline:
+- Situation
+- What matters now
+- Recommended next move
+- Open questions for founder review`;
+        break;
+      case "Summarize signals":
+        preparedBody = `Signal summary for review:
+
+${recentSignalsText}
+
+Summary:
+The company currently has ${companySignals.length} captured signal${companySignals.length === 1 ? "" : "s"}. Review the highest-severity items first and decide which should become tasks or work orders.`;
+        break;
+      case "Create follow-up plan":
+        preparedBody = `Follow-up plan:
+
+Work request:
+${workOrder.request}
+
+Due: ${workOrder.dueText}
+
+Suggested follow-up steps:
+1. Confirm what outcome is needed by the due time
+2. Identify blockers from recent signals or decisions
+3. Prepare one concrete next action for founder approval
+4. Review results before any external commitment`;
+        break;
+      case "Generate decision brief":
+        preparedBody = `Decision brief for founder review:
+
+Decision question:
+${workOrder.request}
+
+Why decide now:
+${workOrder.sourceContext}
+
+Relevant company context:
+- Stage: ${companyProfile.stage}
+- Main goal: ${companyProfile.mainGoal || "Not set yet"}
+- Bottleneck: ${companyProfile.bottleneck || "Not set yet"}
+
+Recommended decision path:
+Prepare the decision, review supporting signals and prior decisions, then approve or revise before acting.`;
+        break;
+    }
+
+    return `Operator Work Order Deliverable
+
+Work request:
+${workOrder.request}
+
+Deliverable type: ${workOrder.deliverableType}
+Due: ${workOrder.dueText}
+Source context: ${workOrder.sourceContext}
+
+Company context:
+- Company: ${getCompanyName()}
+- Stage: ${companyProfile.stage}
+- Main goal: ${companyProfile.mainGoal || "Not set yet"}
+- Bottleneck: ${companyProfile.bottleneck || "Not set yet"}
+
+Recent company signals:
+${recentSignalsText}
+
+Recent decisions:
+${recentDecisionsText}
+
+Prepared output:
+${preparedBody}
+
+---
+AI prepares. User approves.
+This deliverable was prepared for your review only. The AI Operator will not send emails, spend money, delete data, or make commitments automatically.`;
+  }
+
+  async function prepareOperatorWorkOrder(workOrder: OperatorWorkOrder) {
+    setRunningMissionId(workOrder.id);
+
+    let preparedOutput = buildOperatorDeliverable(workOrder);
+
+    try {
+      const response = await fetch("/api/operator", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workOrder,
+          companyProfile,
+          companyState,
+          companySignals: companySignals.slice(0, 10),
+          tasks: tasks.slice(0, 10),
+          documents: documents.slice(0, 5),
+          decisions: decisions.slice(0, 5),
+        }),
+      });
+
+      const data = (await response.json()) as {
+        deliverable?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !data.deliverable) {
+        throw new Error(data.error || "AI Operator could not run this mission.");
+      }
+
+      preparedOutput = data.deliverable;
+    } catch {
+      preparedOutput = `${preparedOutput}\n\n---\nAI Operator API fallback:\nThe real AI Operator could not respond, so this prototype used the local mission template instead.`;
+    } finally {
+      setRunningMissionId(null);
+    }
+
+    setWorkOrders((currentWorkOrders) =>
+      currentWorkOrders.map((order) =>
+        order.id === workOrder.id
+          ? {
+              ...order,
+              status: "Prepared",
+              preparedOutput,
+            }
+          : order
+      )
+    );
+
+    const newDocument: DocumentItem = {
+      id: documents.length + 1,
+      title: workOrder.title,
+      type: `Operator deliverable · ${workOrder.deliverableType}`,
+      content: preparedOutput,
+    };
+
+    setDocuments((currentDocuments) => [newDocument, ...currentDocuments]);
+    setActiveSection("documents");
+  }
+
+  function createTaskFromOperatorDeliverable(workOrder: OperatorWorkOrder) {
+    const newTask: Task = {
+      id: tasks.length + 1,
+      title: `Review and execute: ${workOrder.title}`,
+      owner: "AI Operator",
+      status: "Waiting for approval",
+      source: "Operator Deliverable",
+      context:
+        workOrder.preparedOutput ||
+        `Operator work order request: ${workOrder.request}`,
+    };
+
+    setTasks((currentTasks) => [newTask, ...currentTasks]);
+    setActiveSection("tasks");
   }
 
   function getCompanyName() {
@@ -367,6 +1040,7 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
         },
         body: JSON.stringify({
           companyState,
+          companySignals: companySignals.slice(0, 10),
         }),
       });
 
@@ -421,45 +1095,9 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
     return "Review your current operating state and choose the next company action.";
   }
 
-  function getSignals(): Signal[] {
-    return [
-      {
-        id: 1,
-        title: "Customer clarity is still thin",
-        type: "Customer signal",
-        description:
-          "The company room has a product direction, but the first painful customer segment still needs sharper definition.",
-        importance: "High",
-      },
-      {
-        id: 2,
-        title: "Document gap detected",
-        type: "Document signal",
-        description:
-          "There is no approved customer brief yet. This may make future tasks and AI advice less precise.",
-        importance: "Medium",
-      },
-      {
-        id: 3,
-        title: "Founder bottleneck declared",
-        type: "Operations signal",
-        description:
-          companyProfile.bottleneck ||
-          "The system does not yet know the founder&apos;s biggest operating bottleneck.",
-        importance: companyProfile.bottleneck ? "High" : "Medium",
-      },
-      {
-        id: 4,
-        title: "Trust boundary required",
-        type: "Trust signal",
-        description:
-          "Future Gmail and document connections should detect company signals, not monitor private life.",
-        importance: "High",
-      },
-    ];
-  }
 
-  function getStatusClass(status: TaskStatus) {
+
+function getStatusClass(status: TaskStatus) {
     if (status === "Approved") {
       return "bg-emerald-50 text-emerald-700";
     }
@@ -595,31 +1233,58 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              {companyState.nodes.map((node) => (
-                <div
-                  key={node.name}
-                  className="rounded-[2rem] border border-neutral-200 bg-white/80 p-6 shadow-sm transition hover:-translate-y-0.5 hover:bg-white"
-                >
-                  <p className="text-sm text-neutral-400">Node</p>
-                  <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em]">
-                    {node.name}
-                  </h2>
-                  <p className="mt-3 text-sm leading-6 text-neutral-600">
-                    {node.status}
-                  </p>
-                  <p className="mt-4 text-sm leading-6 text-neutral-500">
-                    Risk: {node.risk}
-                  </p>
-                  <p className="mt-4 rounded-2xl bg-[#f7f6f2] p-4 text-sm leading-6 text-neutral-500">
-                    Next question: {node.nextQuestion}
-                    <br />
-                    Next action: {node.nextAction}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {companyState.nodes.map((node) => (
+  <div
+    key={node.name}
+    className={`rounded-[2rem] p-6 shadow-sm transition hover:-translate-y-0.5 ${
+      getSeverityStyles(node.signalSeverity).card
+    }`}
+    style={getSeverityStyles(node.signalSeverity).cardStyle}
+  >
+    <p className="text-sm text-neutral-400">Node</p>
+
+    <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em]">
+      {node.name}
+    </h2>
+
+    {node.signalSeverity && node.signalSeverity !== "Gray" && (
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-medium ${
+            getSeverityStyles(node.signalSeverity).badge
+          }`}
+          style={getSeverityStyles(node.signalSeverity).badgeStyle}
+        >
+          {node.signalSeverity}
+        </span>
+
+        {node.signalCount ? (
+          <span className="rounded-full bg-white/70 px-3 py-1 text-xs text-neutral-500">
+            {node.signalCount} signal
+            {node.signalCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </div>
+    )}
+
+    <p className="mt-3 text-sm leading-6 text-neutral-600">
+      {node.status}
+    </p>
+
+    <p className="mt-4 text-sm leading-6 text-neutral-500">
+      Risk: {node.risk}
+    </p>
+
+    <p className="mt-4 rounded-2xl bg-[#f7f6f2] p-4 text-sm leading-6 text-neutral-500">
+      Next question: {node.nextQuestion}
+      <br />
+      Next action: {node.nextAction}
+    </p>
+  </div>
+))}
           </div>
-        </>
+        </div>
+      </>
       );
     }
 
@@ -627,23 +1292,205 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
       const waitingTasks = tasks.filter(
         (task) => task.status === "Waiting for approval"
       );
+      const redSignals = companySignals.filter(
+        (signal) => signal.severity === "Red"
+      );
+      const yellowSignals = companySignals.filter(
+        (signal) => signal.severity === "Yellow"
+      );
+      const latestSignal = companySignals[0];
+      const suggestedNextNeed = latestSignal
+        ? {
+            title: latestSignal.recommendedAction,
+            why: `Based on the latest ${latestSignal.severity.toLowerCase()} signal in ${latestSignal.node}, this may be the next thing the company needs.`,
+            action: latestSignal.recommendedAction,
+            severity: latestSignal.severity,
+          }
+        : {
+            title: companyState.topPriority,
+            why: "Based on the current company state, the system can suggest one next need even before external signals are connected.",
+            action: companyState.topPriority,
+            severity: "Gray" as const,
+          };
+
+      function createTaskFromSuggestion() {
+        const newTask: Task = {
+          id: tasks.length + 1,
+          title: suggestedNextNeed.action,
+          owner: "AI Operator",
+          status: "Waiting for approval",
+          source: "Predictive Assistance",
+          context: suggestedNextNeed.why,
+        };
+
+        setTasks((currentTasks) => [newTask, ...currentTasks]);
+        setActiveSection("tasks");
+      }
 
       return (
         <div>
-          <p className="text-sm text-neutral-500">Today</p>
-          <h1 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">
-            Today&apos;s operating brief
-          </h1>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-neutral-500">Today</p>
+              <h1 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">
+                Today&apos;s operating brief
+              </h1>
+            </div>
+
+          </div>
 
           <div className="mt-8 grid gap-5">
+            <div className="rounded-[2rem] border-2 border-neutral-300 bg-white p-6 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-950">
+                    Save today&apos;s brief to Company Memory
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                    Turn this operating brief into a prepared document so it can be saved in Documents.
+                  </p>
+                </div>
+
+                <button
+                  onClick={saveTodayBriefAsDocument}
+                  className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+                >
+                  Save as Document
+                </button>
+              </div>
+            </div>
             <div className="rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-950">
+                    Prepare weekly operating review
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                    Summarize this week&apos;s signals, tasks, documents, and decisions into one review document.
+                  </p>
+                </div>
+
+                <button
+                  onClick={saveWeeklyReviewAsDocument}
+                  className="rounded-full border border-neutral-200 bg-white px-5 py-3 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+                >
+                  Prepare Weekly Review
+                </button>
+              </div>
+            </div>
+            <div className="rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-950">
+                    Top priority
+                  </p>
+                  <p className="mt-3 text-sm leading-6 text-neutral-500">
+                    {companyProfile.mainGoal ||
+                      "Set a main company goal so the AI operating room can focus today&apos;s work."}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div
+              className={`rounded-[2rem] p-6 shadow-sm ${
+                latestSignal
+                  ? getSeverityStyles(latestSignal.severity).card
+                  : "border border-neutral-200 bg-white/70"
+              }`}
+              style={
+                latestSignal
+                  ? getSeverityStyles(latestSignal.severity).cardStyle
+                  : {}
+              }
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-950">
+                    Company signal alert
+                  </p>
+                  <p className="mt-3 text-sm leading-6 text-neutral-500">
+                    {latestSignal
+                      ? `${latestSignal.title}: ${latestSignal.recommendedAction}`
+                      : "No company signals yet. Capture a signal to make today's brief more useful."}
+                  </p>
+                </div>
+
+                {latestSignal && (
+                  <span
+                    className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
+                      getSeverityStyles(latestSignal.severity).badge
+                    }`}
+                    style={getSeverityStyles(latestSignal.severity).badgeStyle}
+                  >
+                    {latestSignal.severity}
+                  </span>
+                )}
+              </div>
+
+              {companySignals.length > 0 && (
+                <p className="mt-4 text-xs leading-5 text-neutral-500">
+                  {redSignals.length} red signal
+                  {redSignals.length === 1 ? "" : "s"} · {yellowSignals.length} yellow signal
+                  {yellowSignals.length === 1 ? "" : "s"}
+                </p>
+              )}
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  onClick={saveTodayBriefAsDocument}
+                  className="rounded-full bg-neutral-950 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+                >
+                  Save Today Brief
+                </button>
+
+                <button
+                  onClick={saveWeeklyReviewAsDocument}
+                  className="rounded-full border border-neutral-300 bg-white px-5 py-3 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+                >
+                  Prepare Weekly Review
+                </button>
+              </div>
+            </div>
+
+            <div
+              className={`rounded-[2rem] p-6 shadow-sm ${
+                suggestedNextNeed.severity !== "Gray"
+                  ? getSeverityStyles(suggestedNextNeed.severity).card
+                  : "border border-neutral-200 bg-white/70"
+              }`}
+              style={
+                suggestedNextNeed.severity !== "Gray"
+                  ? getSeverityStyles(suggestedNextNeed.severity).cardStyle
+                  : {}
+              }
+            >
+              <div className="mb-4 inline-flex rounded-full bg-white/70 px-3 py-1 text-xs font-medium text-neutral-500 shadow-sm">
+                Predictive Assistance
+              </div>
+
               <p className="text-sm font-semibold text-neutral-950">
-                Top priority
+                Suggested next need
               </p>
-              <p className="mt-3 text-sm leading-6 text-neutral-500">
-                {companyProfile.mainGoal ||
-                  "Set a main company goal so the AI operating room can focus today&apos;s work."}
+              <p className="mt-3 text-sm leading-6 text-neutral-600">
+                You may need to: {suggestedNextNeed.title}
               </p>
+
+              <div className="mt-4 rounded-2xl bg-white/70 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Why
+                </p>
+                <p className="mt-2 text-sm leading-6 text-neutral-600">
+                  {suggestedNextNeed.why}
+                </p>
+              </div>
+
+              <button
+                onClick={createTaskFromSuggestion}
+                className="mt-5 rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-600 transition hover:bg-neutral-50"
+              >
+                Create Task from Suggestion
+              </button>
             </div>
 
             <div className="rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm">
@@ -674,42 +1521,412 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
     if (activeSection === "signals") {
       return (
         <div>
-          <p className="text-sm text-neutral-500">Signals</p>
+          <p className="text-sm text-neutral-500">Intelligence Inbox</p>
           <h1 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">
             Company signals
           </h1>
 
+          <div className="mt-8 rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm">
+            <p className="text-sm font-semibold text-neutral-950">
+              Quick Capture
+            </p>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
+              Paste an email, customer feedback, deadline, tool alert, idea, or
+              company problem. AI Company Run will turn it into a company signal.
+            </p>
+
+            <textarea
+              value={quickCaptureInput}
+              onChange={(event) => setQuickCaptureInput(event.target.value)}
+              placeholder="Example: Vercel sent a Build Failed email after my latest deployment."
+              className="mt-5 min-h-32 w-full resize-none rounded-[1.5rem] border border-neutral-200 bg-white px-4 py-4 text-sm leading-6 text-neutral-800 outline-none transition placeholder:text-neutral-400 focus:border-neutral-400"
+            />
+
+            <button
+              onClick={analyzeQuickCapture}
+              className="mt-4 rounded-full bg-neutral-950 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+            >
+              Analyze Signal
+            </button>
+          </div>
+
           <div className="mt-8 space-y-3">
-            {getSignals().map((signal) => (
-              <div
-                key={signal.id}
-                className="rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm text-neutral-400">{signal.type}</p>
-                    <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">
-                      {signal.title}
-                    </h2>
+            {companySignals.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-neutral-200 bg-white/50 p-6 text-sm leading-6 text-neutral-500">
+                No company signals yet. Use Quick Capture to turn a messy input
+                into a clear operating signal.
+              </div>
+            ) : (
+              companySignals.map((signal) => (
+                <div
+                  key={signal.id}
+                  className={`rounded-[2rem] p-6 shadow-sm ${
+                    getSeverityStyles(signal.severity).card
+                  }`}
+                  style={getSeverityStyles(signal.severity).cardStyle}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-neutral-400">
+                        {signal.source} · {signal.type}
+                      </p>
+                      <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">
+                        {signal.title}
+                      </h2>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="rounded-full bg-[#f7f6f2] px-3 py-1 text-xs text-neutral-500">
+                        {signal.node}
+                      </span>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          getSeverityStyles(signal.severity).badge
+                        }`}
+                        style={getSeverityStyles(signal.severity).badgeStyle}
+                      >
+                        {signal.severity}
+                      </span>
+                    </div>
                   </div>
 
-                  <span className="rounded-full bg-[#f7f6f2] px-3 py-1 text-xs text-neutral-500">
-                    {signal.importance}
-                  </span>
+                  <p className="mt-4 text-sm leading-6 text-neutral-500">
+                    {signal.summary}
+                  </p>
+
+                  <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                      Why it matters
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      {signal.whyItMatters}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                      Recommended action
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      {signal.recommendedAction}
+                    </p>
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <button
+                      onClick={() => createTaskFromSignal(signal)}
+                      className="rounded-full border border-neutral-200 px-4 py-2 text-xs font-medium text-neutral-600 transition hover:bg-white"
+                    >
+                      Create Task from Signal
+                    </button>
+
+                    <button
+                      onClick={() => assignSignalToOperator(signal)}
+                      className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50"
+                    >
+                      Assign to Operator
+                    </button>
+
+                    <button
+                      onClick={() => ignoreSignal(signal.id)}
+                      className="rounded-full border border-neutral-200 px-4 py-2 text-xs font-medium text-neutral-500 transition hover:bg-white"
+                    >
+                      Ignore Signal
+                    </button>
+                  </div>
                 </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
 
-                <p className="mt-4 text-sm leading-6 text-neutral-500">
-                  {signal.description}
+    if (activeSection === "operator") {
+      return (
+        <div>
+          <p className="text-sm text-neutral-500">AI Operator</p>
+          <h1 className="mt-2 text-4xl font-semibold tracking-[-0.04em]">
+            Mission Control
+          </h1>
+
+          <div className="mt-8 rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm">
+            <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+              <div>
+                <div className="inline-flex rounded-full bg-[#f7f6f2] px-3 py-1 text-xs font-medium text-neutral-500">
+                  AI Employee · Ready for assignment
+                </div>
+                <h2 className="mt-4 text-xl font-semibold tracking-[-0.03em] text-neutral-950">
+                  Assign missions to your AI Operator and turn outside signals
+                  into reviewable company work.
+                </h2>
+                <p className="mt-3 text-sm leading-6 text-neutral-500">
+                  Think of this as mission control for your one-person company.
+                  You can assign internal missions, research missions, and
+                  execution prep missions. The operator prepares the work, but
+                  never takes external action alone.
                 </p>
-
-                <button
-                  onClick={() => createOperatingTask(signal.title)}
-                  className="mt-5 rounded-full border border-neutral-200 px-4 py-2 text-xs font-medium text-neutral-600 transition hover:bg-white"
-                >
-                  Prepare task from signal
-                </button>
               </div>
-            ))}
+
+              <div className="rounded-2xl bg-[#f7f6f2] p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Operating rules
+                </p>
+                <p className="mt-3 text-sm leading-6 text-neutral-600">
+                  Can prepare: research briefs, pain point hunts, launch ideas,
+                  plans, drafts, task lists, and decision briefs.
+                </p>
+                <p className="mt-3 text-sm leading-6 text-neutral-600">
+                  Cannot do alone: send emails, spend money, delete data, or
+                  commit to customers.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm">
+            <p className="text-sm font-semibold text-neutral-950">
+              Assign a mission to your AI Operator
+            </p>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
+              Choose a mission type, describe what the operator should investigate
+              or prepare, then review the output before turning it into a task,
+              document, or decision.
+            </p>
+
+            <div className="mt-5 rounded-2xl bg-[#f7f6f2] p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                Mission templates
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {[
+                  {
+                    label: "Research competitors",
+                    request:
+                      "Research competitors in the AI operating system / AI productivity market and prepare a short competitor brief.",
+                    deliverableType: "Research market signals" as DeliverableType,
+                    dueText: "Today",
+                    sourceContext:
+                      "AI operating systems, solo founder tools, productivity software, and startup operating platforms",
+                  },
+                  {
+                    label: "Find customer pain points",
+                    request:
+                      "Find customer pain points for solo founders who struggle with scattered company tasks, emails, signals, and decisions.",
+                    deliverableType: "Find customer pain points" as DeliverableType,
+                    dueText: "Today",
+                    sourceContext:
+                      "Solo founders, indie hackers, freelancers, one-person companies, and early startup operators",
+                  },
+                  {
+                    label: "Prepare launch ideas",
+                    request:
+                      "Prepare launch ideas for AI Company Run and suggest clear positioning angles.",
+                    deliverableType: "Prepare launch ideas" as DeliverableType,
+                    dueText: "This week",
+                    sourceContext:
+                      "AI Company Run, founder operating system, AI prepares and user approves",
+                  },
+                  {
+                    label: "Summarize internal signals",
+                    request:
+                      "Summarize the recent company signals and identify what should become tasks, decisions, or operator missions.",
+                    deliverableType: "Summarize internal signals" as DeliverableType,
+                    dueText: "Today",
+                    sourceContext:
+                      "Recent company signals, company room node status, tasks, and decisions",
+                  },
+                  {
+                    label: "Prepare execution plan",
+                    request:
+                      "Prepare an execution plan for the next visible product improvement.",
+                    deliverableType: "Prepare execution plan" as DeliverableType,
+                    dueText: "Tomorrow morning",
+                    sourceContext:
+                      "Current product state, active bottleneck, pending tasks, and founder goal",
+                  },
+                ].map((template) => (
+                  <button
+                    key={template.label}
+                    onClick={() => applyMissionTemplate(template)}
+                    className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50"
+                  >
+                    {template.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <textarea
+              value={workOrderRequest}
+              onChange={(event) => setWorkOrderRequest(event.target.value)}
+              placeholder="Example: Research the market for AI operating systems for solo founders and find 5 customer pain points."
+              className="mt-5 min-h-32 w-full resize-none rounded-[1.5rem] border border-neutral-200 bg-white px-4 py-4 text-sm leading-6 text-neutral-800 outline-none transition placeholder:text-neutral-400 focus:border-neutral-400"
+            />
+
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Mission type
+                </label>
+                <select
+                  value={workOrderDeliverableType}
+                  onChange={(event) =>
+                    setWorkOrderDeliverableType(
+                      event.target.value as DeliverableType
+                    )
+                  }
+                  className="mt-2 w-full rounded-[1.25rem] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-800 outline-none transition focus:border-neutral-400"
+                >
+                  <option value="Research market signals">
+                    Research market signals
+                  </option>
+                  <option value="Find customer pain points">
+                    Find customer pain points
+                  </option>
+                  <option value="Prepare launch ideas">
+                    Prepare launch ideas
+                  </option>
+                  <option value="Summarize internal signals">
+                    Summarize internal signals
+                  </option>
+                  <option value="Prepare execution plan">
+                    Prepare execution plan
+                  </option>
+                  <option value="Generate decision brief">
+                    Generate decision brief
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Mission due time
+                </label>
+                <input
+                  value={workOrderDueText}
+                  onChange={(event) => setWorkOrderDueText(event.target.value)}
+                  placeholder="Tomorrow morning"
+                  className="mt-2 w-full rounded-[1.25rem] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-800 outline-none transition placeholder:text-neutral-400 focus:border-neutral-400"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  Mission context
+                </label>
+                <input
+                  value={workOrderSourceContext}
+                  onChange={(event) =>
+                    setWorkOrderSourceContext(event.target.value)
+                  }
+                  placeholder="Example: Solo founders, indie hackers, AI productivity market"
+                  className="mt-2 w-full rounded-[1.25rem] border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-800 outline-none transition placeholder:text-neutral-400 focus:border-neutral-400"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={createOperatorWorkOrder}
+              className="mt-4 rounded-full bg-neutral-950 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
+            >
+              Assign Mission
+            </button>
+          </div>
+
+          <div className="mt-8 space-y-3">
+            {workOrders.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-neutral-200 bg-white/50 p-6 text-sm leading-6 text-neutral-500">
+                No missions yet. Assign a mission to the AI Operator and it will
+                prepare a reviewable deliverable for your company.
+              </div>
+            ) : (
+              workOrders.map((workOrder) => (
+                <div
+                  key={workOrder.id}
+                  className="rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-neutral-400">
+                        Mission · {workOrder.deliverableType} · Due {workOrder.dueText}
+                      </p>
+                      <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">
+                        {workOrder.title}
+                      </h2>
+                    </div>
+
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${
+                        workOrder.status === "Prepared"
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-neutral-100 text-neutral-600"
+                      }`}
+                    >
+                      {workOrder.status}
+                    </span>
+                  </div>
+
+                  <p className="mt-4 text-sm leading-6 text-neutral-600">
+                    {workOrder.request}
+                  </p>
+
+                  <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                      Employee-style work brief
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      I will run this mission by {workOrder.dueText}. I will use
+                      {workOrder.sourceContext} as context. I will stop at a
+                      reviewable deliverable and wait for founder approval.
+                    </p>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                      Source context
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                      {workOrder.sourceContext}
+                    </p>
+                  </div>
+
+                  {workOrder.preparedOutput && (
+                    <div className="mt-4 rounded-2xl bg-[#f7f6f2] p-4">
+                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+                        Prepared output
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-neutral-600">
+                        {workOrder.preparedOutput}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    {workOrder.status === "Assigned" && (
+                      <button
+                        onClick={() => prepareOperatorWorkOrder(workOrder)}
+                        disabled={runningMissionId === workOrder.id}
+                        className="rounded-full bg-neutral-950 px-4 py-2 text-xs font-medium text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:bg-neutral-300"
+                      >
+                        {runningMissionId === workOrder.id
+                          ? "Operator is running..."
+                          : "Operator: Run Mission"}
+                      </button>
+                    )}
+
+                    {workOrder.preparedOutput && (
+                      <button
+                        onClick={() => createTaskFromOperatorDeliverable(workOrder)}
+                        className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-700 transition hover:bg-neutral-50"
+                      >
+                        Create Task from Deliverable
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       );
@@ -767,9 +1984,9 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
                 </p>
               </div>
             ) : (
-              documents.map((document) => (
+              documents.map((document, documentIndex) => (
                 <div
-                  key={document.id}
+                  key={`${document.id}-${document.type}-${documentIndex}`}
                   className="rounded-[2rem] border border-neutral-200 bg-white/70 p-6 shadow-sm"
                 >
                   <p className="text-sm text-neutral-400">{document.type}</p>
@@ -779,6 +1996,13 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
                   <p className="mt-4 text-sm leading-6 text-neutral-600">
                     {document.content}
                   </p>
+
+                  <button
+                    onClick={() => approveDocumentAsDecision(document)}
+                    className="mt-5 rounded-full bg-neutral-950 px-4 py-2 text-xs font-medium text-white transition hover:bg-neutral-800"
+                  >
+                    Approve as Decision
+                  </button>
                 </div>
               ))
             )}
@@ -1116,6 +2340,13 @@ Suggested output: Turn this task into a short operating memo with a clear decisi
                         className="w-full rounded-full bg-neutral-950 px-4 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-neutral-800"
                       >
                         Approve as Task
+                      </button>
+
+                      <button
+                        onClick={assignAdvisorAdviceToOperator}
+                        className="w-full rounded-full border border-neutral-200 bg-white px-4 py-3 text-sm font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+                      >
+                        Assign to Operator
                       </button>
 
                       <button

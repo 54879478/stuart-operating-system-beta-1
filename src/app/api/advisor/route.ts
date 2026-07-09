@@ -5,6 +5,7 @@ import {
   getFallbackAdvisorResponse,
   type AdvisorResponse,
 } from "@/lib/advisorPrompt";
+import type { CompanySignal } from "@/lib/companySignal";
 import type { CompanyState } from "@/lib/companyState";
 
 const openai = new OpenAI({
@@ -33,7 +34,10 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       companyState?: CompanyState;
+      companySignals?: CompanySignal[];
     };
+
+    const companySignals = body.companySignals ?? [];
 
     if (!body.companyState) {
       return Response.json(
@@ -51,7 +55,7 @@ export async function POST(request: Request) {
         },
         {
           role: "user",
-          content: buildAdvisorUserPrompt(body.companyState),
+          content: buildAdvisorUserPrompt(body.companyState, companySignals),
         },
       ],
     });
@@ -61,7 +65,7 @@ export async function POST(request: Request) {
 
     if (!parsed) {
       return Response.json({
-        advisor: getFallbackAdvisorResponse(body.companyState),
+        advisor: getFallbackAdvisorResponse(body.companyState, companySignals),
         usedFallback: true,
       });
     }

@@ -1,3 +1,4 @@
+import type { CompanySignal } from "./companySignal";
 import type { CompanyState } from "./companyState";
 
 export type AdvisorResponse = {
@@ -41,6 +42,9 @@ Rules:
 - Do not mention Gmail, inbox, or private data unless the user connected it.
 - Be proactive, but always explain why.
 - AI prepares. User approves.
+- When recent company signals are provided, read them carefully.
+- Red severity signals are urgent operating issues and should outrank new feature work.
+- If a Red Operations or tool signal exists (for example a failed deployment or build), say so clearly and recommend fixing it before continuing product work.
 
 Output format:
 Return only valid JSON with these exact keys:
@@ -54,7 +58,31 @@ Each value should be 1-3 short sentences.
 `;
 }
 
-export function buildAdvisorUserPrompt(companyState: CompanyState) {
+function formatRecentSignals(signals: CompanySignal[]) {
+  if (signals.length === 0) {
+    return "No recent company signals captured.";
+  }
+
+  return signals
+    .map(
+      (signal) => `
+- ${signal.title}
+  Severity: ${signal.severity}
+  Node: ${signal.node}
+  Type: ${signal.type}
+  Source: ${signal.source}
+  Summary: ${signal.summary}
+  Why it matters: ${signal.whyItMatters}
+  Recommended action: ${signal.recommendedAction}
+  Captured: ${signal.createdAt}`
+    )
+    .join("\n");
+}
+
+export function buildAdvisorUserPrompt(
+  companyState: CompanyState,
+  companySignals: CompanySignal[] = []
+) {
   return `
 Analyze this company state and produce an Operating Advisor response.
 
@@ -67,6 +95,9 @@ ${companyState.topPriority}
 Main risk:
 ${companyState.mainRisk}
 
+Recent company signals (newest first):
+${formatRecentSignals(companySignals)}
+
 Company nodes:
 ${companyState.nodes
   .map(
@@ -74,6 +105,9 @@ ${companyState.nodes
 - ${node.name}
   Status: ${node.status}
   Risk: ${node.risk}
+  Signal severity: ${node.signalSeverity ?? "Gray"}
+  Active signals: ${node.signalCount ?? 0}
+  Latest signal: ${node.latestSignalTitle ?? "None"}
   Next question: ${node.nextQuestion}
   Next action: ${node.nextAction}`
   )
@@ -81,14 +115,30 @@ ${companyState.nodes
 
 Respond as the Operating Advisor.
 Focus on the most important bottleneck.
+If a recent Red signal exists, especially in Operations, address it directly.
 Do not list everything.
 Tell the founder what to do next.
 `;
 }
 
 export function getFallbackAdvisorResponse(
-  companyState: CompanyState
+  companyState: CompanyState,
+  companySignals: CompanySignal[] = []
 ): AdvisorResponse {
+  const urgentSignal = companySignals.find((signal) => signal.severity === "Red");
+
+  if (urgentSignal) {
+    return {
+      whatHappened: `A red ${urgentSignal.node.toLowerCase()} signal was detected: ${urgentSignal.title}.`,
+      whyItMatters:
+        urgentSignal.whyItMatters ||
+        "Urgent operating issues can block product progress until they are resolved.",
+      whatToDoNext:
+        urgentSignal.recommendedAction ||
+        "Fix this urgent signal before starting new feature work.",
+    };
+  }
+
   return {
     whatHappened:
       "Your company room has enough structure to show the first operating pattern.",
